@@ -135,7 +135,7 @@ try:
 			message = lora.get_downlink()["data"].hex()
 			print("Received " + message)
 			showMidMessages("Received", message)
-			pause(10)
+			sleep(10)
 		
 		#Pause and check for keyboard input
 		for i in range(pinginterval):
