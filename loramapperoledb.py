@@ -23,10 +23,20 @@ from rak811 import Mode, Rak811
 from ttn_secrets import APPS_KEY, DEV_ADDR, NWKS_KEY
 
 # Configuration: Time between LoRa pings (in seconds)
-pinginterval = 60
+selectedPingInterval = 60
+minPingInterval = 10
+activePingInterval = selectedPingInterval
+rapidPingCount = 0
 
-# Mode of joystick. (1 = change spread factor, 2 = change ping interval)
-mode = 1
+# Menu mode of joystick. (1=change spread factor, 2=change ping interval, 3=button A operation)
+menuMode = 1
+menuActiveTime = 100 #Now many loop cycles the menu messages stay showing
+
+#Mode of buttons (1=4 pings at minimum time intervals, 2-7=instance ping at SF7-12)
+btnAMode = 1
+btnBMode = 5
+btnAModeMsg = ""
+btnBModeMsg = ""
 
 # Create the I2C interface.
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -83,28 +93,30 @@ draw = ImageDraw.Draw(image)
 
 # Draw some shapes.
 # First define some constants to allow easy resizing of shapes.
-padding = -2
+padding = -1
 top = padding
 bottom = height-padding
 # Move left to right keeping track of the current x position for drawing shapes.
 x = 0
 
 # Load fonts
-font = ImageFont.load_default()
+#font = ImageFont.load_default()
 fontbig = ImageFont.truetype("ARIAL.TTF", 36)
 fontmid = ImageFont.truetype("ARIAL.TTF", 18)
+fontsmall = ImageFont.truetype("ARIAL.TTF", 12)
 
 # Get IP address
 cmd = "hostname -I | cut -d\' \' -f1"
 ip = subprocess.check_output(cmd, shell=True).decode("utf-8")
 
-def showMessages(line1, line2, line3, line4):
+def showMessages(line1, line2="", line3="", line4=""):
+	lineHeight = 12
 	# Draw a black filled box to clear the image.
 	draw.rectangle((0, 0, width, height), outline=0, fill=0)
-	draw.text((x, top+0), line1, font=font, fill=255)
-	draw.text((x, top+8), line2, font=font, fill=255)
-	draw.text((x, top+16), line3, font=font, fill=255)
-	draw.text((x, top+24), line4, font=font, fill=255)
+	draw.text((x, top+0), line1, font=fontsmall, fill=255)
+	draw.text((x, top+lineHeight), line2, font=fontsmall, fill=255)
+	draw.text((x, top+2*lineHeight), line3, font=fontsmall, fill=255)
+	draw.text((x, top+3*lineHeight), line4, font=fontsmall, fill=255)
 	disp.image(image)
 	disp.show()
 
@@ -115,45 +127,94 @@ def showBigMessage(message):
 	disp.image(image)
 	disp.show()
 	
-def showMidMessages(line1, line2):
+def showMidMessages(line1, line2="", line3="", line3small=False):
+	lineHeight = 18
+	
+	if line3small:
+		line3font=fontsmall
+		line3Spacer = 16
+	else:
+		line3font=fontmid
+		line3Spacer = 0
+		
 	# Draw a black filled box to clear the image.
 	draw.rectangle((0, 0, width, height), outline=0, fill=0)
 	draw.text((x, top+0), line1, font=fontmid, fill=255)
-	draw.text((x, top+16), line2, font=fontmid, fill=255)
+	draw.text((x, top+lineHeight), line2, font=fontmid, fill=255)
+	draw.text((x, top+2*lineHeight+line3Spacer), line3, font=line3font, fill=255)
 	disp.image(image)
 	disp.show()
 
 def showSendInterval():
-	showMidMessages("Updated send","interval: {}s".format(pinginterval))
+	showMidMessages("Updated send","interval: {}s".format(selectedPingInterval))
 
-def updateDr():
-	if sf == 7:
+def showBtnAMode():
+	global btnAModeMsg
+	if btnAMode == 1:
+		showMidMessages("Set btn #5 mode","Send next 4","at {}s intervals".format(minPingInterval))
+		btnAModeMsg = "#5: 4x{}s".format(minPingInterval)
+	else:
+		showMidMessages("Set btn #5 mode","Instant send at","SF{}".format(btnAMode+5) )
+		btnAModeMsg = "#5: SF{}".format(btnAMode+5)
+	
+def showBtnBMode():
+	global btnBModeMsg
+	if btnBMode == 1:
+		showMidMessages("Set btn #6 mode","Send next 4","at {}s intervals".format(minPingInterval))
+		btnBModeMsg = "#6: 4x{}s".format(minPingInterval)
+	else:
+		showMidMessages("Set btn #6 mode","Instant send at","SF{}".format(btnBMode+5) )
+		btnBModeMsg = "#6: SF{}".format(btnBMode+5)
+	
+def updateDr(sFactor):
+	if sFactor == 7:
 		#Set SF=7
 		lora.dr=5
-	elif sf == 8:
+	elif sFactor == 8:
 		#Set SF=8
 		lora.dr=4
-	elif sf == 9:
+	elif sFactor == 9:
 		#Set SF=9
 		lora.dr=3
-	elif sf == 10:
+	elif sFactor == 10:
 		#Set SF=10
 		lora.dr=2
-	elif sf == 11:
+	elif sFactor == 11:
 		#Set SF=11
 		lora.dr=1
-	elif sf == 12:
+	elif sFactor == 12:
 		#Set SF=12
 		lora.dr=0
-	showMidMessages("New spread factor","SF{}".format(sf))
+	showMidMessages("Spread factor","set to SF{}".format(sFactor))
 
+def activateRapidPings(counter):
+	global rapidPingCount, activePingInterval
+	
+	if rapidPingCount == 0:
+		#Set rapid ping counter to allow 4 pings at min ping interval
+		rapidPingCount = 4
+		#Trigger next send now
+		return activePingInterval
+	elif rapidPingCount < 2:
+		#Add 4 more pings at min ping interval
+		rapidPingCount += 4
+		#Let current cycle continue counting down
+		return counter
+	else:
+		#Cancel rapid pings sequence
+		rapidPingCount = 0
+		activePingInterval = selectedPingInterval
+		showBigMessage("Cancel")
+		#Reset next send to full interval
+		return 0
+		
 # Create lora object
 lora = Rak811()
 
 # Most of the setup should happen only once...
 print("Setup")
 # Update display message
-showMessages("LoRa Mapper","IP:"+ip,"Send interval {}s".format(pinginterval),"Setting Up LoRa Node")
+showMessages("LoRa Mapper","IP:"+ip,"Send interval {}s".format(selectedPingInterval),"Setting Up LoRa Node")
 lora.hard_reset()
 lora.mode = Mode.LoRaWan
 lora.band = "EU868"
@@ -162,27 +223,39 @@ lora.set_config(dev_addr=DEV_ADDR,
 				nwks_key=NWKS_KEY,
 				adr="off")
 
-# Update display message
+# Join
 showMessages("LoRa Mapper","IP:"+ip,"","Joining ABP")
-
 print("Joining")
 lora.join_abp()
 lora.dr = 5
 sf = 7
 sent = 0
 
-print("Sending packets every {}seconds - Interrupt to cancel loop".format(pinginterval))
+#Call these here to set short message globals used in status messages
+showBtnAMode()
+showBtnBMode()
+
+print("Sending packets every {}seconds - Interrupt to cancel loop".format(selectedPingInterval))
 print("You can send downlinks from the TTN console")
 
 try:
+	#Main endless map pinging loop inside error handler	
+	sfOverride = False
 	while True:
-		print("Sending {} SF={}".format(sent+1,sf))
-		showBigMessage("SF {}....".format(sf))
+		#Reset menu mode on each send cycle
+		menuMode = 4
+		#Get actual SF from lora module for display in messages
+		actualSF = 5 - lora.dr + 7
+		if rapidPingCount > 0:
+			print("Sending rapid mode {} SF={}".format(rapidPingCount,actualSF))
+		else:
+			print("Sending {} SF={}".format(sent+1,actualSF))
+		showBigMessage("SF {}....".format(actualSF))
 		# Cayenne lpp random value as analog
 		lora.send(bytes.fromhex("0102{:04x}".format(randint(0, 0x7FFF))))
 		sent +=1
 
-		message = "SF{} Sent={}".format(sf,sent)
+		message = "SF{} Sent={}".format(actualSF,sent)
 		showMessages("LoRa Mapper","IP:"+ip,message,"Waiting for reply...")
 		while lora.nb_downlinks:
 			message = lora.get_downlink()["data"].hex()
@@ -190,71 +263,147 @@ try:
 			showMidMessages("Received", message)
 			sleep(10)
 		
+		#Reset SF if over-ridden
+		if sfOverride:
+			updateDr(sf)
+			sfOverride = False
+			
+		#PingInterval can be over-ridden by buttons, so initialise here
+		#Decrease as we just did a ping, then check again to set active interval
+		if rapidPingCount > 0:
+			rapidPingCount -= 1
+		if rapidPingCount > 0:
+			activePingInterval = minPingInterval
+		else:
+			activePingInterval = selectedPingInterval
+		
 		#Pause until next ping and check for inputs
-		joystickActive = 0
+		menuActive = 0
 		i = 0
-		while i < pinginterval:
+		while i < activePingInterval:
 			i += 1
 
 			#Check for inputs
-			if button_C.value == False:
+			if button_A.value == False:
+				#Check btn mode
+				if btnAMode == 1:
+					i = activateRapidPings(i)
+				else:
+					#Set temporary sf and trigger next send now
+					tempSF = btnAMode + 5
+					if 6 < tempSF < 13:
+						#Set flag to indicate SF is over-ridden then over-ride and ping
+						sfOverride = True
+						updateDr(tempSF)
+						i = activePingInterval
+			elif button_B.value == False:
+				#Check btn mode
+				if btnBMode == 1:
+					i = activateRapidPings(i)
+				else:
+					#Set temporary sf and trigger next send now
+					tempSF = btnBMode + 5
+					if 6 < tempSF < 13:
+						#Set flag to indicate SF is over-ridden then over-ride and ping
+						sfOverride = True
+						updateDr(tempSF)
+						i = activePingInterval
+			elif button_C.value == False:
 				#Trigger next send now
-				i = pinginterval
+				i = activePingInterval
 			elif button_D.value == False:
 				while button_D.value == False:
 					sleep(0.05)
-				i -= (10 - joystickActive)
-				joystickActive = 10
+				i -= (menuActiveTime - menuActive)
+				menuActive = menuActiveTime
 				pause = 0.05
-				#Increment mode
-				mode += 1
-				if mode > 2:
-					mode = 1
-				if mode == 1:
+				#Increment menu mode
+				menuMode += 1
+				if menuMode > 4:
+					menuMode = 1
+				if menuMode == 1:
 					showMidMessages("Set SF","SF={}".format(sf))  
-				elif mode == 2:
-					showMidMessages("Set interval","Interval={}".format(pinginterval))
+				elif menuMode == 2:
+					showMidMessages("Set interval","Interval={}".format(selectedPingInterval))
+				elif menuMode == 3:
+					showBtnAMode()
+				elif menuMode == 4:
+					showBtnBMode()
 			elif button_L.value == False:
-				while button_L.value == False:
-					sleep(0.05)
-				i -= (10 - joystickActive)
-				joystickActive = 10
-				pause = 0.05
-				if mode == 1:
-					#Decrease SF
-					sf -= 1
-					if sf < 7:
-						sf = 7
-					updateDr()
-				elif mode == 2:
-					#Decrease ping interval by 15s
-					pinginterval -= 15
-					if pinginterval < 15:
-						pinginterval = 15
-					showSendInterval()
+				#Only allow change when menu active
+				if menuActive > 0:
+					while button_L.value == False:
+						sleep(0.05)
+					i -= (menuActiveTime - menuActive)
+					menuActive = menuActiveTime
+					pause = 0.05
+					if menuMode == 1:
+						#Decrease SF
+						sf -= 1
+						if sf < 7:
+							sf = 7
+						updateDr(sf)
+					elif menuMode == 2:
+						#Decrease ping interval by minPingInterval
+						selectedPingInterval -= minPingInterval
+						if selectedPingInterval < minPingInterval:
+							selectedPingInterval = minPingInterval
+						showSendInterval()
+					elif menuMode == 3:
+						#Decrease btnA mode
+						btnAMode -= 1
+						if btnAMode < 1:
+							btnAMode = 1
+						showBtnAMode()
+					elif menuMode == 4:
+						#Decrease btnB mode
+						btnBMode -= 1
+						if btnBMode < 1:
+							btnBMode = 1
+						showBtnBMode()
 			elif button_R.value == False:
-				while button_R.value == False:
-					sleep(0.05)
-				i -= (10 - joystickActive)
-				joystickActive = 10
-				pause = 0.05
-				if mode == 1:
-					#Increase SF
-					sf += 1
-					if sf > 12:
-						sf = 12
-					updateDr()
-				elif mode == 2:
-					#Increase ping interval by 15s
-					pinginterval += 15
-					showSendInterval()
-			elif joystickActive > 0:
+				#Only allow change when menu active
+				if menuActive > 0:
+					while button_R.value == False:
+						sleep(0.05)
+					i -= (menuActiveTime - menuActive)
+					menuActive = menuActiveTime
+					pause = 0.05
+					if menuMode == 1:
+						#Increase SF
+						sf += 1
+						if sf > 12:
+							sf = 12
+						updateDr(sf)
+					elif menuMode == 2:
+						#Increase ping interval by minPingInterval
+						selectedPingInterval += minPingInterval
+						showSendInterval()
+					elif menuMode == 3:
+						#Increase btnA mode
+						btnAMode += 1
+						if btnAMode > 7:
+							btnAMode = 7
+						showBtnAMode()
+					elif menuMode == 4:
+						#Increase btnB mode
+						btnBMode += 1
+						if btnBMode > 7:
+							btnBMode = 7
+						showBtnBMode()
+			elif menuActive > 0:
 				#Show menu settings messages and keep pause interval short
-				joystickActive -= 1
+				menuActive -= 1
 			else:
 				#Menu input activity ended, revert to 1 second pause and std status message
-				showMidMessages("SF{} Sent={}".format(sf,sent),"Next trans {}s".format(pinginterval-i))
 				pause = 1
+				if rapidPingCount > 0:
+					#Rapid ping counter msg
+					btnStatusMsg = "Rapid pings {}".format(rapidPingCount)
+				else:
+					#Standard status messages
+					btnStatusMsg = "(" + btnAModeMsg + "      " + btnBModeMsg + ")"
+				showMidMessages("SF{} Sent={}".format(sf,sent),"Next send {}s".format(activePingInterval-i),btnStatusMsg,rapidPingCount==0)
 				
 			sleep(pause)
 				
