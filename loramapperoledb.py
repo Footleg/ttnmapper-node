@@ -5,7 +5,7 @@
 # Install keyboard library: sudo pip3 install keyboard
 # Requires ARIAL.TTF file in same folder as you run from
 
-import sys
+import sys, os
 from random import randint
 from time import sleep
 
@@ -19,12 +19,15 @@ import adafruit_ssd1306
 #import keyboard
 from digitalio import DigitalInOut, Direction, Pull
 
-from rak811 import Mode, Rak811
+from rak811 import Mode, Rak811, Rak811TimeoutError, Rak811ResponseError
 from ttn_secrets import APPS_KEY, DEV_ADDR, NWKS_KEY
+
+#Get path to this script (used to load font resources)
+script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Configuration: Time between LoRa pings (in seconds)
 selectedPingInterval = 60
-minPingInterval = 10
+minPingInterval = 5
 activePingInterval = selectedPingInterval
 rapidPingCount = 0
 
@@ -101,9 +104,9 @@ x = 0
 
 # Load fonts
 #font = ImageFont.load_default()
-fontbig = ImageFont.truetype("ARIAL.TTF", 36)
-fontmid = ImageFont.truetype("ARIAL.TTF", 18)
-fontsmall = ImageFont.truetype("ARIAL.TTF", 12)
+fontbig = ImageFont.truetype(script_dir + "/ARIAL.TTF", 36)
+fontmid = ImageFont.truetype(script_dir + "/ARIAL.TTF", 18)
+fontsmall = ImageFont.truetype(script_dir + "/ARIAL.TTF", 12)
 
 # Get IP address
 cmd = "hostname -I | cut -d\' \' -f1"
@@ -167,6 +170,7 @@ def showBtnBMode():
 		btnBModeMsg = "#6: SF{}".format(btnBMode+5)
 	
 def updateDr(sFactor):
+	print("Updating SF:{}".format(sFactor))
 	if sFactor == 7:
 		#Set SF=7
 		lora.dr=5
@@ -212,12 +216,25 @@ def activateRapidPings(counter):
 lora = Rak811()
 
 # Most of the setup should happen only once...
-print("Setup")
+print("Initialise Display")
 # Update display message
 showMessages("LoRa Mapper","IP:"+ip,"Send interval {}s".format(selectedPingInterval),"Setting Up LoRa Node")
+print("Rak811 Hard Reset")
 lora.hard_reset()
-lora.mode = Mode.LoRaWan
+print("Set mode to LoRaWan")
+modeSetTries = 1
+while modeSetTries < 11:
+	showMessages("LoRa Mapper","IP:"+ip,"Send interval {}s".format(selectedPingInterval),"Setting LoRa Mode {}".format(modeSetTries))
+	try:
+		lora.mode = Mode.LoRaWan
+		modeSetTries = 100
+	except Rak811TimeoutError as e:
+		modeSetTries += 1
+		sleep(1)
+	
+print("Set band to EU868")
 lora.band = "EU868"
+print("Rak811 set config")
 lora.set_config(dev_addr=DEV_ADDR,
 				apps_key=APPS_KEY,
 				nwks_key=NWKS_KEY,
@@ -252,16 +269,28 @@ try:
 			print("Sending {} SF={}".format(sent+1,actualSF))
 		showBigMessage("SF {}....".format(actualSF))
 		# Cayenne lpp random value as analog
-		lora.send(bytes.fromhex("0102{:04x}".format(randint(0, 0x7FFF))))
-		sent +=1
-
-		message = "SF{} Sent={}".format(actualSF,sent)
-		showMessages("LoRa Mapper","IP:"+ip,message,"Waiting for reply...")
+		try:
+			lora.send(bytes.fromhex("0102{:04x}".format(randint(0, 0x7FFF))))
+			sent +=1
+			message = "SF{} Sent={}".format(actualSF,sent)
+			print(message)
+			showMessages("LoRa Mapper","IP:"+ip,message,"Waiting for reply...")
+		except Rak811TimeoutError as e:
+			showMessages("LoRa Mapper","Error on send","Rak811TimeoutError",str(sys.exc_info()[1])) 
+			sleep(5)
+		except Rak811ResponseError as e:
+			showMessages("LoRa Mapper","Error on send","Rak811ResponseError",str(sys.exc_info()[1])) 
+			sleep(5)
+			# Error seems to be 'Not joined' so try joining again
+			lora.join_abp()
+			
 		while lora.nb_downlinks:
 			message = lora.get_downlink()["data"].hex()
 			print("Received " + message)
 			showMidMessages("Received", message)
 			sleep(10)
+		
+		sleep(1);
 		
 		#Reset SF if over-ridden
 		if sfOverride:
@@ -273,9 +302,9 @@ try:
 		if rapidPingCount > 0:
 			rapidPingCount -= 1
 		if rapidPingCount > 0:
-			activePingInterval = minPingInterval
+			activePingInterval = minPingInterval - 1
 		else:
-			activePingInterval = selectedPingInterval
+			activePingInterval = selectedPingInterval - 1
 		
 		#Pause until next ping and check for inputs
 		menuActive = 0
