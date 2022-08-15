@@ -1,6 +1,6 @@
 # ttnmapper-node
 Hardware project for mapping the things network using the PiSupply LoRa node pHAT.
-This project uses a small monchrome OLED display from Adafruit (https://www.adafruit.com/product/3527) mounted on top of the PiSupply LoRa node pHAT (https://uk.pi-supply.com/products/iot-lora-node-phat-for-raspberry-pi) on a Raspberry Pi Zero. (It should work on any Raspberry Pi model which the LoRa node pHAT supports).
+This project uses a monchrome OLED display with joystick and button from Adafruit (https://www.adafruit.com/product/3531) mounted on top of the PiSupply LoRa node pHAT (https://uk.pi-supply.com/products/iot-lora-node-phat-for-raspberry-pi) on a Raspberry Pi Zero. (It should work on any Raspberry Pi model which the LoRa node pHAT supports). NOTE: The photographs below show an older hardware configuration using a USB macro-keypad and simple OLED display. These have been replaced with the OLED bonnet from Adafruit and the code now uses the buttons and joystick on this to navigate menus and settings.
 
 The software script is based on the example in the rak811 library:
 https://github.com/AmedeeBulle/pyrak811/blob/master/examples/abp.py
